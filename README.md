@@ -75,7 +75,7 @@ Once the FastAPI server is running, open the Swagger UI:
 
 ```json
 {
-  "question": "Is this tripod stable for outdoor photography?"
+  "question": "Recommend a good and stable tripod for outdoor pics"
 }
 
 
