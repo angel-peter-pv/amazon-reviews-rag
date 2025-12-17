@@ -7,6 +7,10 @@ import re
 import textwrap
 import os
 import requests
+import mlflow
+import time     
+
+# from retriever import retrieve
 
 from src.retriever import retrieve
 from typing import List, Dict
@@ -14,7 +18,7 @@ from typing import List, Dict
 
 #config
  
-DEFAULT_K=3
+DEFAULT_K=5
 SYSTEM_INSTRUCTIONS = (
     "You are an assistant that answers product questions using ONLY the provided context.\n"
     "Cite sources inline like [source:ASIN:chunk_id].\n"
@@ -24,6 +28,8 @@ SYSTEM_INSTRUCTIONS = (
     "Provide a short answer and then list sources used."
 )
 OLLAMA_MODEL = "mistral"
+mlflow.set_experiment("amazon-rag-latency")
+
 
 #clean the retrived text before passing to llm
 def clean_text(text:str)->str:
@@ -73,25 +79,44 @@ def call_llm_ollama(prompt:str,model=OLLAMA_MODEL)->str:
 #generate ans by retrieving chunks, building context and prompt, calling the LLM, 
 #returning the final answer with source metadata.
 def generate_answer(question:str,k=DEFAULT_K)->Dict:
-    retrieved, distances,ids=retrieve(question,k=k)
-    if not retrieved:
-        return {
+
+    total_start_time = time.time()
+    with mlflow.start_run(nested=True):
+        mlflow.log_param("llm_model", OLLAMA_MODEL)
+        mlflow.log_param("top_k", k) 
+
+        retrieval_start = time.time()
+        retrieved, distances,ids=retrieve(question,k=k)
+        retrieval_time = time.time() - retrieval_start
+        mlflow.log_metric("retrieval_time_ms", retrieval_time * 1000)
+
+        if not retrieved:
+            mlflow.log_metric("total_response_time_ms",(time.time() - total_start_time) * 1000)
+            return {
             "question": question,
             "answer": "I don't know based on the provided information.",
             "sources": []
-        }
-    context=build_context(retrieved)
-    prompt=build_prompt(question,context)
-    answer=call_llm_ollama(prompt)
+            }
+        context=build_context(retrieved)
+        prompt=build_prompt(question,context)
+    
+        llm_start = time.time()
 
-    sources=[
-        {"asin":r.get("asin"),
-         "chunk_id":r.get("chunk_id"),
-         "product_name": r.get("product_name"),      
-         "distance":float(distances[i])}
-        for i,r in enumerate(retrieved)
-    ]
-    return {"question":question,"answer":answer,"sources":sources,"prompt":prompt}
+        answer=call_llm_ollama(prompt)
+
+        llm_time = time.time() - llm_start  
+        mlflow.log_metric("llm_inference_time_ms", llm_time * 1000) 
+        total_time = time.time() - total_start_time  
+        mlflow.log_metric("total_response_time_ms", total_time * 1000) 
+
+        sources=[
+            {"asin":r.get("asin"),
+            "chunk_id":r.get("chunk_id"),
+            "product_name": r.get("product_name"),      
+            "distance":float(distances[i])}
+            for i,r in enumerate(retrieved)
+            ]
+        return {"question":question,"answer":answer,"sources":sources,"prompt":prompt}
 
 
 

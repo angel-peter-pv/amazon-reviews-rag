@@ -11,6 +11,9 @@ from src.retriever import retrieve
 
 from typing import List, Dict
 import tiktoken 
+import time
+import mlflow
+
 
 
 #config
@@ -27,6 +30,8 @@ SYSTEM_INSTRUCTIONS = (
 )
 MODEL_NAME = "gpt-4o-mini"
 MAX_RESPONSE_TOKENS = 512
+mlflow.set_experiment("amazon-rag-latency")
+
 
 #count no:of tokens
 tokenizer=tiktoken.encoding_for_model(MODEL_NAME)
@@ -107,28 +112,52 @@ def call_llm_openai(prompt:str,model=MODEL_NAME)->str:
 #generate ans by retrieving chunks, building context and prompt, calling the LLM, 
 #returning the final answer with source metadata.
 def generate_answer(question:str,k=DEFAULT_K,llm_model="gpt-4o-mini")->Dict:
-    retrieved, distances,ids=retrieve(question,k=k)
-    if not retrieved:
-        return {
+
+    #reponse time start
+    total_start_time= time.time()
+    with mlflow.start_run(nested=True):
+        mlflow.log_param("llm_model",llm_model)
+        mlflow.log_param("top_k",k)
+
+        #retrieval time
+        retrieval_start=time.time()
+        retrieved, distances,ids=retrieve(question,k=k)
+        retrieval_time=time.time()-retrieval_start
+        mlflow.log_metric("retrieval_time_ms",retrieval_time*1000)
+
+        if not retrieved:
+            mlflow.log_metric("total_response_time_ms",(time.time()-total_start_time)*1000)
+            return {
             "question": question,
             "answer": "I don't know based on the provided information.",
             "sources": [],
             "prompt": ""
         }
-    context=build_context(retrieved)
-    prompt=build_prompt(question,context)
-    answer=call_llm_openai(prompt,model=llm_model)
+        context=build_context(retrieved)
+        prompt=build_prompt(question,context)
+        
+        #llm inference timing
+        llm_start=time.time()
+        answer=call_llm_openai(prompt,model=llm_model)
+        llm_time=time.time()-llm_start
 
-    enc = tiktoken.encoding_for_model(llm_model)
-    print("ANSWER TOKENS:", len(enc.encode(answer)))
-    sources=[
+        mlflow.log_metric("llm_inference_time_ms",llm_time*1000)
+
+        #total response time
+        total_time=time.time()-total_start_time
+        mlflow.log_metric("total_response_time_ms",total_time*1000)
+
+
+        enc = tiktoken.encoding_for_model(llm_model)
+        print("ANSWER TOKENS:", len(enc.encode(answer)))
+        sources=[
         {"asin":r.get("asin"),
          "chunk_id":r.get("chunk_id"),
          "product_name": r.get("product_name"),      
          "distance":float(distances[i])}
-        for i,r in enumerate(retrieved)
-    ]
-    return {"question":question,"answer":answer,"sources":sources,"prompt":prompt}
+            for i,r in enumerate(retrieved)
+        ]
+        return {"question":question,"answer":answer,"sources":sources,"prompt":prompt}
 
 
 
@@ -143,7 +172,7 @@ def format_result(result:Dict)->str:
 
 if __name__ == "__main__":
     q="which tripod is good and stable for photography?"
-    res = generate_answer(q, k=3, llm_model="gpt-4o-mini")
+    res = generate_answer(q, k=5, llm_model="gpt-4o-mini")
     print(format_result(res))
 
 
