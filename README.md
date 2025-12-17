@@ -45,6 +45,18 @@ LLM Answer Generation
 Answer Returned via API
 ```
 
+## Performance Monitoring
+MLflow is used to track performance metrics such as:
+- Retrieval latency
+- LLM inference latency
+- Total response time
+
+These metrics are logged across different LLM backends including:
+- OpenAI (gpt-4o-mini)
+- Local Mistral model via Ollama
+
+This enables a clear comparison of how each component of the RAG pipeline contributes
+to the overall response time under different LLM configurations.
 
 ## Dataset
 
@@ -61,13 +73,15 @@ For experimentation and faster iteration, a subset of the dataset is extracted a
 ```export OPENAI_API_KEY="your_api_key"```
 5. Start the FastAPI server
 ```uvicorn src.api:app --reload```
+6. Start MLflow UI to view latency metrics
+``` mlflow ui ```
 
    
 ## Using API
 Once the FastAPI server is running, open the Swagger UI:
 ```http://127.0.0.1:8000/docs```
   
-### Ask a Question
+### Eg: Ask a Question
 
 - Endpoint:
 `POST /ask`
